@@ -1,36 +1,39 @@
 {
-    "index_patterns": ["logs-*"],
-    "template": {
-      "settings": {
-        "number_of_shards": 1
+  "index_patterns": ["logs-*"],
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 1,
+      "index.lifecycle.name": "logs_policy",
+      "index.lifecycle.rollover_alias": "logs"
+    },
+    "mappings": {
+      "properties": {
+        "container_id": { "type": "integer" },
+        "random_number": { "type": "integer" },
+        "app_name": { "type": "keyword" },
+        "hostname": { "type": "keyword" },
+        "ip": { "type": "keyword" },
+        "log_level": { "type": "keyword" },
+        "message": { "type": "text" },
+        "method": { "type": "keyword" },
+        "path": { "type": "keyword" },
+        "parameters": { "type": "keyword" },
+        "request_url": { "type": "keyword" },
+        "server_name": { "type": "keyword" },
+        "username": { "type": "keyword" }
       },
-      "mappings": {
-        "properties": {
-          "container_id": { "type": "integer" },
-          "random_number": { "type": "integer" },
-          "app_name": { "type": "keyword" },
-          "hostname": { "type": "keyword" },
-          "ip": { "type": "keyword" },
-          "log_level": { "type": "keyword" },
-          "message": { "type": "text" },
-          "method": { "type": "keyword" },
-          "path": { "type": "keyword" },
-          "parameters": { "type": "keyword" },
-          "request_url": { "type": "keyword" },
-          "server_name": { "type": "keyword" },
-          "username": { "type": "keyword" }
-        },
-        "dynamic_templates": [
-          {
-            "strings_as_keywords": {
-              "match_mapping_type": "string",
-              "mapping": {
-                "type": "keyword",
-                "ignore_above": 256
-              }
+      "dynamic_templates": [
+        {
+          "strings_as_keywords": {
+            "match_mapping_type": "string",
+            "mapping": {
+              "type": "keyword",
+              "ignore_above": 256
             }
           }
-        ]
-      }
+        }
+      ]
     }
   }
+}
