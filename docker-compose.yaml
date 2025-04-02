@@ -33,8 +33,9 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      - ./logstash.conf:/usr/share/logstash/pipeline/logstash.conf
-      - ./templates:/usr/share/logstash/config/templates
+      - ./logstash/pipeline:/usr/share/logstash/pipeline
+      - ./logstash/config:/usr/share/logstash/config
+      - logstash-logs:/usr/share/logstash/logs
     command: logstash -f /usr/share/logstash/pipeline/logstash.conf
     links:
       - elasticsearch
@@ -59,3 +60,4 @@ services:
 
 volumes:
   elasticsearch-data:
+  logstash-logs:
