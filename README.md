@@ -25,3 +25,30 @@ Run the following command:
 
 `http://localhost:5601/`
 `http://localhost:9200/`
+
+
+### File-based Log Rotation (Logstash)
+
+The Logstash configuration (`logstash/pipeline/logstash.conf`) implements file rotation:
+
+```
+file {
+  path => "/usr/share/logstash/logs/flask-logs.log"
+  codec => json_lines
+  max_file_size => "1GB"
+  max_file_age => "1d"
+  archive => true
+  archive_path => "/usr/share/logstash/logs/archived/flask-logs-%{+YYYY-MM-dd}.zip"
+  archive_zip => true
+  archive_zip_level => 9
+  archive_zip_cleanup => true
+  archive_zip_cleanup_age => "30d"
+}
+```
+
+This configuration:
+
+- Creates log files up to 1GB in size (rotates when this size is reached)
+- Archives old logs into dated ZIP files (`flask-logs-YYYY-MM-DD.zip`)
+- Applies ZIP compression level 9 (maximum compression)
+- Automatically deletes archives older than 30 days
