@@ -14,161 +14,36 @@ app = Flask(__name__)
 fake = Faker()
 
 # Simple TCP socket sender
+
+
 def send_log_to_logstash(log_data):
     try:
+        # Try to connect to logstash, if it fails, just log the error
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.connect(('logstash', 5000))
-        log_json = json.dumps(log_data)
-        sock.sendall((log_json + '\n').encode())
+        sock.settimeout(1)  # Add timeout to prevent hanging
+        if sock.connect_ex(('logstash', 5000)) == 0:
+            log_json = json.dumps(log_data)
+            sock.sendall((log_json + '\n').encode())
         sock.close()
     except Exception as e:
         print(f"Error sending log: {e}")
 
-# Wait for Logstash to be available
-def wait_for_logstash():
-    logstash_host = 'logstash'
-    logstash_port = 5000
-
-    print("Waiting for Logstash to be ready...")
-    while True:
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(1)
-                if s.connect_ex((logstash_host, logstash_port)) == 0:
-                    print("Logstash is available!")
-                    break
-        except Exception:
-            pass
-        time.sleep(1)
 
 # Setup standard logging for console output
 logger = logging.getLogger('flask-app')
 logger.setLevel(logging.INFO)
 console_handler = logging.StreamHandler()
-console_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+console_handler.setFormatter(logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 logger.addHandler(console_handler)
 
-# Log Generator
-def generate_massive_logs(target_gb=10):
-    """Generate logs until reaching approximately the target size in GB"""
-    
-    wait_for_logstash()  # Ensure logstash is ready
-    
-    logger.info(f"Starting massive log generation (target: {target_gb}GB)")
-
-    # Track log size approximation (in bytes)
-    total_size = 0
-    target_size = target_gb * 1024 * 1024 * 1024  # Convert GB to bytes
-
-    # Prepare log content options
-    log_levels = ['INFO', 'DEBUG', 'ERROR', 'WARN', 'TRACE']
-    usernames = [fake.user_name() for _ in range(100)]
-    app_names = ["app1", "app2", "app3", "app4", "app5"]
-
-    # URLs for request simulation - use the exact ones from the shell script
-    request_urls = ["/home", "/about", "/contact", "/faq", "/services"]
-
-    # Parameters for request simulation - use the exact ones from the shell script
-    parameters_options = ["param1=value1", "param2=value2",
-                          "param3=value3", "param4=value4", "param5=value5"]
-
-    # Methods for API calls
-    http_methods = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH']
-
-    # Predefined messages from the shell script
-    log_messages = [
-        "User login successful: username=johndoe",
-        "Error connecting to database: host=127.0.0.1, port=5432, error=connection refused",
-        "System reboot initiated by user admin",
-        "Server outage detected at 12:30 PM, initiating failover procedure",
-        "Security alert: suspicious activity detected from IP address 192.168.1.100",
-        "Backup completed successfully: files=100, size=200GB",
-        "System performance issue detected, high memory usage: usage=90%, process=mongod",
-        "Incoming request: method=POST, path=/api/users, client=192.168.1.100",
-        "Application error: message='null pointer exception', method=main(), class=App",
-        "Cron job completed: name=cleanup, status=success, duration=10m"
-    ]
-
-    # IP addresses for variety
-    ips = [fake.ipv4() for _ in range(100)]
-
-    count = 0
-    start_process_time = time.time()
-    last_status_time = start_process_time
-
-    try:
-        while total_size < target_size:
-            count += 1
-
-            # Select random values for this log
-            username = random.choice(usernames)
-            app_name = random.choice(app_names)
-            container_id = random.randint(1, 100)
-            log_level = random.choice(log_levels)
-            ip = random.choice(ips)
-            request_url = random.choice(request_urls)
-            parameters = random.choice(parameters_options)
-            random_number = random.randint(1, 1000)
-            message = random.choice(log_messages)
-            method = random.choice(http_methods)
-
-            # Create log data that exactly matches the shell script format
-            log_data = {
-                'timestamp': datetime.datetime.now().isoformat(),
-                'hostname': socket.gethostname(),
-                'server_name': socket.gethostname(),
-                'username': username,
-                'app_name': app_name,
-                'container_id': container_id,
-                'log_level': log_level,
-                'message': message,
-                'request_url': request_url,
-                'parameters': parameters,
-                'path': request_url,
-                'method': method,
-                'ip': ip,
-                'random_number': random_number
-            }
-
-            # Send directly to logstash
-            send_log_to_logstash(log_data)
-
-            # Calculate log size
-            log_size = len(json.dumps(log_data))
-            total_size += log_size
-
-            # Print status every 100,000 logs or every 5 seconds
-            current_time = time.time()
-            if count % 100000 == 0 or current_time - last_status_time > 5:
-                elapsed = current_time - start_process_time
-                gb_written = total_size / (1024 * 1024 * 1024)
-                rate = count / elapsed if elapsed > 0 else 0
-                percent_complete = (total_size / target_size) * 100
-
-                logger.info(
-                    f"Generated {count:,} logs ({gb_written:.2f} GB / {target_gb} GB - {percent_complete:.1f}%), "
-                    f"rate: {rate:.0f} logs/sec"
-                )
-                last_status_time = current_time
-
-            # To avoid overwhelming CPU, sleep occasionally
-            if count % 10000 == 0:
-                time.sleep(0.01)
-
-    except Exception as e:
-        logger.error(f"Error during log generation: {str(e)}")
-
-    finally:
-        elapsed = time.time() - start_process_time
-        logger.info(
-            f"Finished generating {count:,} logs ({total_size / (1024 * 1024 * 1024):.2f} GB) in {elapsed:.1f} seconds"
-        )
-
 # Flask routes
+
+
 @app.route('/')
 def home():
     username = request.args.get('username', 'anonymous')
-    
+
     log_data = {
         'timestamp': datetime.datetime.now().isoformat(),
         'hostname': socket.gethostname(),
@@ -185,11 +60,12 @@ def home():
         'ip': request.remote_addr,
         'random_number': random.randint(1, 1000)
     }
-    
+
     send_log_to_logstash(log_data)
     logger.info(f"Home page accessed by {username}")
-    
+
     return render_template('index.html')
+
 
 @app.route('/api/logs')
 def get_logs():
@@ -212,7 +88,7 @@ def get_logs():
         'ip': request.remote_addr,
         'random_number': random.randint(1, 1000)
     }
-    
+
     send_log_to_logstash(log_data)
     logger.info(f"API logs accessed, requested {count} logs by {username}")
 
@@ -227,6 +103,7 @@ def get_logs():
         })
 
     return jsonify(logs)
+
 
 @app.route('/api/system')
 def get_system_info():
@@ -248,7 +125,7 @@ def get_system_info():
         'ip': request.remote_addr,
         'random_number': random.randint(1, 1000)
     }
-    
+
     send_log_to_logstash(log_data)
     logger.info(f"System info requested by {username}")
 
@@ -272,6 +149,7 @@ def get_system_info():
     }
 
     return jsonify(system_info)
+
 
 @app.route('/error')
 def trigger_error():
@@ -297,16 +175,30 @@ def trigger_error():
             'ip': request.remote_addr,
             'random_number': random.randint(1, 1000)
         }
-        
+
         send_log_to_logstash(log_data)
         logger.error(f"Error occurred: {str(e)}")
-        
+
         return "Error logged! Check Kibana."
+
 
 @app.route('/generate')
 def start_generation():
-    size_gb = float(request.args.get('size', 10))
     username = request.args.get('username', 'system')
+
+    # Get generation parameters
+    count = request.args.get('count')
+    size_mb = request.args.get('size_mb')
+
+    # Determine generation type and parameters
+    if count is not None:
+        target_count = int(count)
+        generation_type = 'count'
+    elif size_mb is not None:
+        target_size = float(size_mb) * 1024 * 1024  # Convert MB to bytes
+        generation_type = 'size'
+    else:
+        return "Please specify either count or size_mb parameter", 400
 
     log_data = {
         'timestamp': datetime.datetime.now().isoformat(),
@@ -316,36 +208,103 @@ def start_generation():
         'app_name': 'flask-app',
         'container_id': 1,
         'log_level': 'INFO',
-        'message': f"Starting generation of {size_gb}GB of logs by {username}",
+        'message': f"Starting log generation by {username}",
         'request_url': '/generate',
-        'parameters': f'size={size_gb}',
+        'parameters': f'type={generation_type}',
         'path': '/generate',
         'method': request.method,
         'ip': request.remote_addr,
         'random_number': random.randint(1, 1000)
     }
-    
+
     send_log_to_logstash(log_data)
-    logger.info(f"Starting generation of {size_gb}GB of logs by {username}")
+    logger.info(f"Starting log generation by {username}")
 
     # Start generation in a background thread
-    thread = threading.Thread(target=generate_massive_logs, args=(size_gb,))
+    thread = threading.Thread(target=generate_logs, args=(
+        generation_type, target_size if 'size' in locals() else target_count))
     thread.daemon = True
     thread.start()
 
-    return f"Started generating {size_gb}GB of logs in the background. Check Kibana for progress."
+    return f"Started generating logs in the background. Check Kibana for progress."
+
+
+def generate_logs(generation_type, target):
+    """Generate logs based on specified type and target"""
+    logger.info(
+        f"Starting log generation (type: {generation_type}, target: {target})")
+
+    # Track progress
+    total_size = 0
+    total_count = 0
+    start_time = time.time()
+
+    # Prepare log content options
+    log_levels = ['INFO', 'DEBUG', 'ERROR', 'WARN', 'TRACE']
+    usernames = [fake.user_name() for _ in range(100)]
+    app_names = ["app1", "app2", "app3", "app4", "app5"]
+    request_urls = ["/home", "/about", "/contact", "/faq", "/services"]
+    parameters_options = ["param1=value1", "param2=value2",
+                          "param3=value3", "param4=value4", "param5=value5"]
+    http_methods = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH']
+    ips = [fake.ipv4() for _ in range(100)]
+
+    try:
+        while True:
+            # Check if we've reached the target
+            if generation_type == 'size' and total_size >= target:
+                break
+            elif generation_type == 'count' and total_count >= target:
+                break
+
+            # Generate a single log entry
+            log_data = {
+                'timestamp': datetime.datetime.now().isoformat(),
+                'hostname': socket.gethostname(),
+                'server_name': socket.gethostname(),
+                'username': random.choice(usernames),
+                'app_name': random.choice(app_names),
+                'container_id': random.randint(1, 100),
+                'log_level': random.choice(log_levels),
+                'message': f"Generated log entry {total_count + 1}",
+                'request_url': random.choice(request_urls),
+                'parameters': random.choice(parameters_options),
+                'path': random.choice(request_urls),
+                'method': random.choice(http_methods),
+                'ip': random.choice(ips),
+                'random_number': random.randint(1, 1000)
+            }
+
+            # Convert log data to JSON string to calculate size
+            log_json = json.dumps(log_data)
+            log_size = len(log_json.encode('utf-8'))
+
+            # Send log to logstash
+            send_log_to_logstash(log_data)
+
+            # Update counters
+            total_size += log_size
+            total_count += 1
+
+            # Log progress every 100 entries
+            if total_count % 100 == 0:
+                elapsed_time = time.time() - start_time
+                if generation_type == 'size':
+                    logger.info(
+                        f"Generated {total_count} logs, {total_size / (1024*1024):.2f}MB so far")
+                else:
+                    logger.info(f"Generated {total_count}/{target} logs")
+
+        # Log completion
+        elapsed_time = time.time() - start_time
+        logger.info(
+            f"Log generation completed. Generated {total_count} logs in {elapsed_time:.2f} seconds")
+
+    except Exception as e:
+        logger.error(f"Error during log generation: {str(e)}")
+
 
 if __name__ == '__main__':
     # Start Flask app
     logger.info("Flask application starting")
-    
-    # Start generating logs in background after a short delay
-    def delayed_start():
-        time.sleep(5)  # Wait for Flask to start
-        thread = threading.Thread(target=generate_massive_logs, args=(10,))
-        thread.daemon = True
-        thread.start()
-        
-    threading.Thread(target=delayed_start, daemon=True).start()
-    
     app.run(host='0.0.0.0', port=5000)
