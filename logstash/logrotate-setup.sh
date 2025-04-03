@@ -19,16 +19,17 @@ cat > /etc/logrotate.d/logstash << EOF
     missingok
     rotate 30
     dateext
-    dateformat -%Y-%m-%d
+    dateformat -%Y%m%d-%H%M%S
     compress
     compresscmd /usr/bin/zip
     uncompresscmd /usr/bin/unzip
     compressext .zip
-    olddir /usr/share/logstash/logs/archived
     compressoptions -9 
+    olddir /usr/share/logstash/logs/archived
     create 0644 logstash logstash
     postrotate
         find /usr/share/logstash/logs/archived -name "*.zip" -type f -mtime +30 -delete
+        echo "Log rotated at \$(date)" >> /var/log/logrotate-execution.log
     endscript
 }
 EOF

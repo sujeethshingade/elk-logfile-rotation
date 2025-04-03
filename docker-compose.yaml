@@ -47,6 +47,15 @@ services:
       elasticsearch:
         condition: service_healthy
 
+  es-setup:
+    image: curlimages/curl:latest
+    volumes:
+      - ./elasticsearch/setup-ilm.sh:/setup-ilm.sh
+    command: ["sh", "/setup-ilm.sh"]
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
   flask-app:
     build:
       context: .

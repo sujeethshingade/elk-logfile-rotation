@@ -35,11 +35,14 @@
         margin-right: 10px;
         margin-bottom: 10px;
       }
-      .btn-error {
-        background-color: #f44336;
-      }
-      .btn-info {
+      .btn-small {
         background-color: #2196f3;
+      }
+      .btn-medium {
+        background-color: #ff9800;
+      }
+      .btn-large {
+        background-color: #f44336;
       }
       pre {
         background-color: #f1f1f1;
@@ -55,76 +58,54 @@
 
       <div class="card">
         <h2>Generate Logs</h2>
-        <p>Choose how you want to generate logs:</p>
-        <div style="margin-bottom: 15px">
-          <h3>Generate by Count:</h3>
-          <a href="/generate?count=1000&username=admin" class="btn"
-            >Generate 1000 Logs</a
-          >
-          <a href="/generate?count=100&username=admin" class="btn"
-            >Generate 100 Logs</a
-          >
-          <a href="/generate?count=10&username=admin" class="btn"
-            >Generate 10 Logs</a
-          >
-        </div>
+        <p>Generate logs to test log rotation (10MB threshold):</p>
         <div>
-          <h3>Generate by Size (MB):</h3>
-          <a href="/generate?size_mb=1000&username=admin" class="btn"
-            >Generate 1000MB Logs</a
+          <a href="/generate?size_mb=1&username=admin" class="btn btn-small"
+            >Generate 1MB</a
           >
-          <a href="/generate?size_mb=100&username=admin" class="btn"
-            >Generate 100MB Logs</a
+          <a href="/generate?size_mb=10&username=admin" class="btn btn-medium"
+            >Generate 10MB</a
           >
-          <a href="/generate?size_mb=10&username=admin" class="btn"
-            >Generate 10MB Logs</a
+          <a href="/generate?size_mb=100&username=admin" class="btn btn-large"
+            >Generate 100MB</a
           >
         </div>
       </div>
 
       <div class="card">
-        <h2>API Endpoints</h2>
-        <p>Try these API endpoints to generate logs based on usage:</p>
-        <a href="/api/logs?username=user1" class="btn btn-info">Fetch Logs</a>
-        <a href="/api/system?username=admin" class="btn btn-info"
-          >System Info</a
-        >
-        <a href="/error?username=developer" class="btn btn-error"
-          >Trigger Error</a
-        >
+        <h2>Log Rotation Configuration</h2>
+        <p>This system implements two rotation mechanisms:</p>
+        <ul>
+          <li>
+            <strong>File-based rotation:</strong> 10MB, ZIP compression, 30-day
+            retention
+          </li>
+          <li>
+            <strong>Elasticsearch ILM:</strong> Indices roll over at 10MB,
+            deleted after 30 days
+          </li>
+        </ul>
       </div>
 
       <div class="card">
-        <h2>Log Format</h2>
-        <p>The logs are generated in this format:</p>
-        <pre>
-{
-  "timestamp": "2025-03-21T12:34:56.789",
-  "server_name": "flask-app",
-  "username": "admin",
-  "log_level": "INFO",
-  "message": "User action details...",
-  "path": "/api/endpoint",
-  "method": "GET",
-  "ip": "192.168.1.1"
-}</pre
-        >
+        <h2>View Results</h2>
+        <p>After generating logs, check:</p>
+        <ul>
+          <li>
+            Kibana:
+            <a href="http://localhost:5601" target="_blank"
+              >http://localhost:5601</a
+            >
+          </li>
+          <li>
+            Log files:
+            <code
+              >docker exec [logstash-container] ls -la
+              /usr/share/logstash/logs/archived/</code
+            >
+          </li>
+        </ul>
       </div>
     </div>
-
-    <script>
-      // Add some interactivity to generate more logs
-      document.addEventListener("mousemove", function () {
-        if (Math.random() < 0.01) {
-          // 1% chance on mouse move
-          fetch("/api/logs?count=1&username=visitor");
-        }
-      });
-
-      // Periodic system info checks to generate more logs
-      setInterval(function () {
-        fetch("/api/system?username=system");
-      }, 5000);
-    </script>
   </body>
 </html>
