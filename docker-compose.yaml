@@ -30,13 +30,17 @@ services:
 
   logstash:
     image: logstash:8.6.0
+    user: root
     ports:
       - "5000:5000"
     volumes:
       - ./logstash/pipeline:/usr/share/logstash/pipeline
       - ./logstash/config:/usr/share/logstash/config
       - logstash-logs:/usr/share/logstash/logs
-    command: logstash -f /usr/share/logstash/pipeline/logstash.conf
+      - ./logstash/logrotate-setup.sh:/logrotate-setup.sh
+    command: >
+      bash -c "/logrotate-setup.sh && chown -R logstash:logstash /usr/share/logstash/logs && 
+      su -c '/usr/share/logstash/bin/logstash -f /usr/share/logstash/pipeline/logstash.conf' logstash"
     links:
       - elasticsearch
     depends_on:
