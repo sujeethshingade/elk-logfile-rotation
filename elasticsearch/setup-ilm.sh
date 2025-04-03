@@ -6,7 +6,7 @@ until curl -s "http://elasticsearch:9200" > /dev/null; do
     sleep 5
 done
 
-# Create ILM policy
+# Create ILM policy with more aggressive rotation for testing
 echo "Creating ILM policy..."
 curl -X PUT "http://elasticsearch:9200/_ilm/policy/logs_policy" -H 'Content-Type: application/json' -d'
 {
@@ -17,6 +17,20 @@ curl -X PUT "http://elasticsearch:9200/_ilm/policy/logs_policy" -H 'Content-Type
           "rollover": {
             "max_size": "10MB",
             "max_age": "1d"
+          },
+          "set_priority": {
+            "priority": 100
+          }
+        }
+      },
+      "warm": {
+        "min_age": "2d",
+        "actions": {
+          "set_priority": {
+            "priority": 50
+          },
+          "forcemerge": {
+            "max_num_segments": 1
           }
         }
       },
@@ -57,8 +71,21 @@ curl -X PUT "http://elasticsearch:9200/_index_template/logs_template" -H 'Conten
         "parameters": { "type": "keyword" },
         "request_url": { "type": "keyword" },
         "server_name": { "type": "keyword" },
-        "username": { "type": "keyword" }
+        "username": { "type": "keyword" },
+        "rotation_tag": { "type": "keyword" }
       }
+    }
+  }
+}
+'
+
+# Create initial index
+echo "Creating initial index..."
+curl -X PUT "http://elasticsearch:9200/%3Clogs-%7Bnow%2Fd%7D-000001%3E" -H 'Content-Type: application/json' -d'
+{
+  "aliases": {
+    "logs": {
+      "is_write_index": true
     }
   }
 }

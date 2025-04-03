@@ -50,6 +50,12 @@
         border-radius: 4px;
         overflow: auto;
       }
+      .status {
+        margin-top: 20px;
+        padding: 10px;
+        border-radius: 4px;
+        background-color: #e1f5fe;
+      }
     </style>
   </head>
   <body>
@@ -70,6 +76,28 @@
             >Generate 100MB</a
           >
         </div>
+        <div class="status" id="status">
+          <p>Click a button to start generating logs.</p>
+        </div>
+        <script>
+          // Simple JavaScript to update status when generating logs
+          document.querySelectorAll('.btn').forEach(button => {
+            button.addEventListener('click', function(e) {
+              e.preventDefault();
+              const url = this.getAttribute('href');
+              document.getElementById('status').innerHTML = '<p>Starting log generation... Please wait.</p>';
+              
+              fetch(url)
+                .then(response => response.text())
+                .then(data => {
+                  document.getElementById('status').innerHTML = `<p>${data}</p>`;
+                })
+                .catch(error => {
+                  document.getElementById('status').innerHTML = `<p>Error: ${error}</p>`;
+                });
+            });
+          });
+        </script>
       </div>
 
       <div class="card">
@@ -92,16 +120,9 @@
         <p>After generating logs, check:</p>
         <ul>
           <li>
-            Kibana:
+            <strong>Kibana:</strong>
             <a href="http://localhost:5601" target="_blank"
               >http://localhost:5601</a
-            >
-          </li>
-          <li>
-            Log files:
-            <code
-              >docker exec [logstash-container] ls -la
-              /usr/share/logstash/logs/archived/</code
             >
           </li>
         </ul>

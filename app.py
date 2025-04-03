@@ -14,8 +14,6 @@ app = Flask(__name__)
 fake = Faker()
 
 # Simple TCP socket sender
-
-
 def send_log_to_logstash(log_data):
     try:
         # Add timestamp if not present
@@ -37,12 +35,12 @@ def send_log_to_logstash(log_data):
         sock.sendall((log_json + '\n').encode())
         sock.close()
 
-        # Also print log for debugging
-        print(f"Log sent to Logstash: {log_json[:200]}...")
+        # Only print summary logs (to avoid console overload)
+        if 'summary' in log_data.get('message', '').lower():
+            print(f"Log sent to Logstash: {log_json[:200]}...")
 
     except Exception as e:
         print(f"Error sending log to Logstash: {e}")
-
 
 # Setup standard logging for console output
 logger = logging.getLogger('flask-app')
@@ -53,8 +51,6 @@ console_handler.setFormatter(logging.Formatter(
 logger.addHandler(console_handler)
 
 # Flask routes
-
-
 @app.route('/')
 def home():
     username = request.args.get('username', 'anonymous')
@@ -73,14 +69,14 @@ def home():
         'path': '/',
         'method': request.method,
         'ip': request.remote_addr,
-        'random_number': random.randint(1, 1000)
+        'random_number': random.randint(1, 1000),
+        'rotation_test': True
     }
 
     send_log_to_logstash(log_data)
     logger.info(f"Home page accessed by {username}")
 
     return render_template('index.html')
-
 
 @app.route('/generate')
 def start_generation():
@@ -101,7 +97,8 @@ def start_generation():
         'path': '/generate',
         'method': request.method,
         'ip': request.remote_addr,
-        'random_number': random.randint(1, 1000)
+        'random_number': random.randint(1, 1000),
+        'rotation_test': True
     }
 
     send_log_to_logstash(log_data)
@@ -112,8 +109,7 @@ def start_generation():
     thread.daemon = True
     thread.start()
 
-    return f"Started generating {size_mb}MB of logs in the background. Check Kibana for progress."
-
+    return f"Started generating {size_mb}MB of logs in the background. Check Kibana for progress or look at the logstash container logs for rotations."
 
 def generate_logs_of_size(target_size_mb):
     """Generate logs of approximately the specified size in MB"""
@@ -121,6 +117,9 @@ def generate_logs_of_size(target_size_mb):
     total_size = 0
     total_count = 0
     start_time = time.time()
+
+    batch_size = 100 if target_size_mb >= 10 else 10  # Batch size based on target
+    log_batches = []
 
     # Generate random data for log fields
     log_levels = ['INFO', 'DEBUG', 'ERROR', 'WARN', 'TRACE']
@@ -133,31 +132,49 @@ def generate_logs_of_size(target_size_mb):
     message_templates = [
         "User {username} accessed {page} page",
         "API request to {endpoint} completed in {time}ms",
-        "Database query executed in {time}ms with result count: {count}"
+        "Database query executed in {time}ms with result count: {count}",
+        "File upload by {username} completed. File size: {size}KB",
+        "User {username} logged in from IP {ip}",
+        "Cache hit ratio: {ratio}% for query {query}",
+        "Memory usage: {memory}MB, CPU: {cpu}%",
+        "Background job {job_id} completed in {time}ms"
     ]
 
     logger.info(f"Starting log generation for {target_size_mb}MB of logs")
 
     try:
+        current_batch = []
+        batch_start_time = time.time()
+
         while total_size < target_size_bytes:
-            # Create random message with placeholders filled
+            # Create a random log message
             template = random.choice(message_templates)
             message = template.format(
                 username=random.choice(usernames),
                 page=random.choice(request_urls),
                 endpoint=f"/api/{random.choice(['users', 'products', 'orders'])}/{random.randint(1, 9999)}",
                 time=random.randint(1, 5000),
-                count=random.randint(0, 1000)
+                count=random.randint(0, 1000),
+                size=random.randint(10, 5000),
+                ip=random.choice(ips),
+                ratio=random.randint(1, 100),
+                query=f"SELECT * FROM {random.choice(['users', 'products', 'orders'])} WHERE id = {random.randint(1, 9999)}",
+                memory=random.randint(100, 8000),
+                cpu=random.randint(1, 100),
+                job_id=f"job-{random.randint(1000, 9999)}"
             )
 
-            # Generate random additional fields to make the log entry bigger if needed
+            # Calculate target entry size based on progress
+            progress_ratio = total_size / target_size_bytes
+            additional_field_count = int(10 * progress_ratio) + 1
+            
+            # Generate random additional fields to make the log entry bigger
             additional_fields = {}
-            if total_size < target_size_bytes * 0.5:  # If we're less than halfway, add more data
-                # Add more fields to make logs larger
-                additional_fields = {
-                    f"field_{i}": fake.text(max_nb_chars=random.randint(20, 200))
-                    for i in range(random.randint(1, 10))
-                }
+            for i in range(additional_field_count):
+                field_name = f"field_{i}"
+                # Make field size larger as we get closer to target
+                field_size = random.randint(50, 200 + int(800 * progress_ratio))
+                additional_fields[field_name] = fake.text(max_nb_chars=field_size)
 
             # Create the log entry
             log_data = {
@@ -175,6 +192,7 @@ def generate_logs_of_size(target_size_mb):
                 'method': random.choice(methods),
                 'ip': random.choice(ips),
                 'random_number': random.randint(1, 10000),
+                'rotation_test': True,
                 **additional_fields
             }
 
@@ -182,23 +200,51 @@ def generate_logs_of_size(target_size_mb):
             log_json = json.dumps(log_data)
             entry_size = len(log_json.encode('utf-8'))
 
-            # Send log to logstash
-            send_log_to_logstash(log_data)
-
+            # Add to batch
+            current_batch.append(log_data)
+            
             # Update counters
             total_size += entry_size
             total_count += 1
 
-            # Progress logging
-            if total_count % 100 == 0:
+            # Send batch if it's full or if we're close to target
+            if len(current_batch) >= batch_size or total_size >= target_size_bytes:
+                for log in current_batch:
+                    send_log_to_logstash(log)
+                
+                current_batch = []
+                
+                # Progress logging
                 progress_mb = total_size / (1024 * 1024)
                 percent = (progress_mb / target_size_mb) * 100
-                logger.info(
-                    f"Generated {total_count} logs ({progress_mb:.2f}MB / {percent:.1f}%)")
-
-            # Throttle slightly to not overwhelm the system
-            if total_count % 10 == 0:
-                time.sleep(0.001)
+                
+                # Only log every 5% or so to avoid spamming
+                if int(percent) % 5 == 0:
+                    logger.info(f"Generated {total_count} logs ({progress_mb:.2f}MB / {percent:.1f}%)")
+                    
+                    # Send progress status to logstash
+                    progress_log = {
+                        'timestamp': datetime.datetime.now().isoformat(),
+                        'hostname': socket.gethostname(),
+                        'server_name': socket.gethostname(),
+                        'username': 'system',
+                        'app_name': 'flask-app',
+                        'container_id': 1,
+                        'log_level': 'INFO',
+                        'message': f"Log generation progress: {total_count} logs ({progress_mb:.2f}MB / {percent:.1f}%)",
+                        'request_url': '/generate',
+                        'parameters': f'size_mb={target_size_mb}',
+                        'path': '/generate',
+                        'method': 'GET',
+                        'ip': '127.0.0.1',
+                        'random_number': random.randint(1, 1000),
+                        'rotation_test': True
+                    }
+                    send_log_to_logstash(progress_log)
+                
+                # Brief pause between batches to reduce CPU load
+                if total_count % (batch_size * 10) == 0:
+                    time.sleep(0.1)
 
         elapsed_time = time.time() - start_time
         logger.info(
@@ -219,7 +265,8 @@ def generate_logs_of_size(target_size_mb):
             'path': '/generate',
             'method': 'GET',
             'ip': '127.0.0.1',
-            'random_number': random.randint(1, 1000)
+            'random_number': random.randint(1, 1000),
+            'rotation_test': True
         }
         send_log_to_logstash(summary_log)
 
@@ -240,10 +287,10 @@ def generate_logs_of_size(target_size_mb):
             'path': '/generate',
             'method': 'GET',
             'ip': '127.0.0.1',
-            'random_number': random.randint(1, 1000)
+            'random_number': random.randint(1, 1000),
+            'rotation_test': True
         }
         send_log_to_logstash(error_log)
-
 
 if __name__ == '__main__':
     logger.info("Flask application starting")

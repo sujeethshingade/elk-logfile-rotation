@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Install required packages
-apt-get update && apt-get install -y logrotate cron zip unzip
+apt-get update && apt-get install -y logrotate cron zip unzip findutils
 
 # Create log directories with proper ownership and permissions
 mkdir -p /usr/share/logstash/logs/archived
@@ -29,20 +29,45 @@ cat > /etc/logrotate.d/logstash << EOF
     create 0644 logstash logstash
     postrotate
         find /usr/share/logstash/logs/archived -name "*.zip" -type f -mtime +30 -delete
-        echo "Log rotated at \$(date)" >> /var/log/logrotate-execution.log
+        echo "Log rotated at \$(date) - Size trigger" >> /var/log/logrotate-execution.log
     endscript
 }
 EOF
 
-# Set up cron job to run logrotate every minute
-echo "* * * * * /usr/sbin/logrotate -f /etc/logrotate.d/logstash > /var/log/logrotate.log 2>&1" > /etc/cron.d/logrotate-logstash
+# Make logrotate config more aggressive for testing purposes
+echo 'include /etc/logrotate.d' > /etc/logrotate.conf
+echo 'rotate 30' >> /etc/logrotate.conf
+echo 'compress' >> /etc/logrotate.conf
+
+# Set up cron job to run logrotate every minute (for testing)
+echo "* * * * * /usr/sbin/logrotate -f /etc/logrotate.d/logstash >> /var/log/logrotate.log 2>&1" > /etc/cron.d/logrotate-logstash
 chmod 0644 /etc/cron.d/logrotate-logstash
+
+# Create a log cleanup script
+cat > /usr/local/bin/cleanup-old-logs.sh << 'EOF'
+#!/bin/bash
+find /usr/share/logstash/logs/archived -name "*.zip" -type f -mtime +30 -delete
+echo "Cleanup script ran at $(date)" >> /var/log/logrotate-cleanup.log
+EOF
+
+chmod +x /usr/local/bin/cleanup-old-logs.sh
+
+# Add daily log cleanup job
+echo "0 0 * * * /usr/local/bin/cleanup-old-logs.sh" > /etc/cron.d/cleanup-logs
+chmod 0644 /etc/cron.d/cleanup-logs
+
+# Create log directories for tracking rotations
+mkdir -p /var/log/logrotate
+touch /var/log/logrotate.log
+touch /var/log/logrotate-execution.log
+touch /var/log/logrotate-cleanup.log
 
 # Start cron daemon in background
 service cron start
 
-# Verify directory permissions (debugging)
+# Verify directory permissions
+echo "Log directories setup:"
 ls -la /usr/share/logstash/logs
 
 # Return success
-echo "Log rotation setup completed"
+echo "Log rotation setup completed successfully"
