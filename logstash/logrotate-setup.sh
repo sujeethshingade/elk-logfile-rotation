@@ -20,7 +20,6 @@ cat > /etc/logrotate.d/logstash << EOF
     rotate 30
     dateext
     dateformat -%Y%m%d-%H%M%S
-    # NO prerotate - it was causing issues
     compress
     compresscmd /usr/bin/zip
     uncompresscmd /usr/bin/unzip
@@ -29,15 +28,21 @@ cat > /etc/logrotate.d/logstash << EOF
     olddir /usr/share/logstash/logs/archived
     create 0644 logstash logstash
     postrotate
-        # Archive with timestamp directly (simpler process)
-        cp /usr/share/logstash/logs/flask-logs.log.1 /usr/share/logstash/logs/archived/flask-logs\$(date +-%Y%m%d-%H%M%S).log
-        # Zip the file properly
+        # Ensure the rotated file has a proper name with .log extension
+        timestamp=\$(date +-%Y%m%d-%H%M%S)
+        
+        # Copy the rotated log with a proper base filename
+        cp /usr/share/logstash/logs/flask-logs.log.1 /usr/share/logstash/logs/archived/flask-logs\${timestamp}.log
+        
+        # Zip files with proper extension inside the archive
         cd /usr/share/logstash/logs/archived
         for f in *.log; do
             if [ -f "\$f" ] && [ ! -f "\$f.zip" ]; then
-                zip -9 "\$f.zip" "\$f" && rm "\$f"
+                # Create zip with the file's original name preserved inside
+                zip -9j "\$f.zip" "\$f" && rm "\$f"
             fi
         done
+        
         # Clean up old files
         find /usr/share/logstash/logs/archived -name "*.zip" -type f -mtime +30 -delete
         echo "Log rotated at \$(date) - Size trigger" >> /var/log/logrotate-execution.log
@@ -45,6 +50,7 @@ cat > /etc/logrotate.d/logstash << EOF
 }
 EOF
 
+# Rest of the script remains the same
 # Set up cron job to run logrotate every minute (for testing)
 echo "* * * * * /usr/sbin/logrotate -v /etc/logrotate.d/logstash >> /var/log/logrotate.log 2>&1" > /etc/cron.d/logrotate-logstash
 chmod 0644 /etc/cron.d/logrotate-logstash
