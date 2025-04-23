@@ -1,11 +1,15 @@
 #!/bin/bash
 
+# filepath: c:\Users\sures\Downloads\elk-trial\inspect-logs.sh
 # Text formatting
 BOLD='\033[1m'
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
+
+# Array to store log files
+declare -a LOG_FILES
 
 # Function to find the logstash container ID
 get_logstash_container() {
@@ -37,29 +41,81 @@ view_current_log() {
   fi
 }
 
-# Function to list archived log files
+# Function to list archived log files with numbering
 list_archived_logs() {
   echo -e "${BLUE}Listing archived log files:${NC}"
+  # Get the list of files and store in array
+  LOG_FILES=()
+  while IFS= read -r line; do
+    if [[ -n "$line" && "$line" != "No archived logs found." ]]; then
+      LOG_FILES+=("$line")
+    fi
+  done < <(docker exec $LOGSTASH_CONTAINER bash -c "find /usr/share/logstash/logs/archived/ -type f -printf '%f\n' 2>/dev/null || echo 'No archived logs found.'")
+  
+  if [[ ${#LOG_FILES[@]} -eq 0 ]]; then
+    echo -e "${YELLOW}No archived logs found.${NC}"
+    return
+  fi
+  
+  # Show detailed listing first
   docker exec $LOGSTASH_CONTAINER bash -c "ls -lah /usr/share/logstash/logs/archived/ || echo 'No archived logs found.'"
+  
+  echo -e "\n${BOLD}Available log files by number:${NC}"
+  for i in "${!LOG_FILES[@]}"; do
+    echo -e "${GREEN}[$((i+1))]${NC} ${LOG_FILES[$i]}"
+  done
 }
 
 # Function to extract and view a specific archived log
 view_archived_log() {
   list_archived_logs
   
-  echo -e "\n${BLUE}Enter the filename to view (or 'exit' to return):${NC}"
-  read -r filename
+  if [[ ${#LOG_FILES[@]} -eq 0 ]]; then
+    return
+  fi
   
-  if [ "$filename" != "exit" ]; then
-    echo -e "${BLUE}File contents:${NC}"
-    if [[ "$filename" == *.zip ]]; then
-      echo -e "${YELLOW}This is a ZIP file. Extracting and showing content...${NC}"
-      docker exec $LOGSTASH_CONTAINER bash -c "mkdir -p /tmp/extracted && \
-        unzip -o /usr/share/logstash/logs/archived/$filename -d /tmp/extracted && \
-        for file in \$(ls /tmp/extracted); do echo \"=== \$file ===\"; cat /tmp/extracted/\$file | head -n 20; echo \"\n[...truncated...]\"; done"
+  echo -e "\n${BLUE}Enter the number or filename to view (or 'exit' to return):${NC}"
+  read -r selection
+  
+  if [[ "$selection" == "exit" ]]; then
+    return
+  fi
+  
+  filename=""
+  # Check if input is a number
+  if [[ "$selection" =~ ^[0-9]+$ ]]; then
+    if [[ $selection -gt 0 && $selection -le ${#LOG_FILES[@]} ]]; then
+      filename="${LOG_FILES[$((selection-1))]}"
+      echo -e "${GREEN}Selected: $filename${NC}"
     else
-      docker exec $LOGSTASH_CONTAINER bash -c "cat /usr/share/logstash/logs/archived/$filename | head -n 20; echo \"\n[...truncated...]\""
+      echo -e "${YELLOW}Invalid number. Please select between 1 and ${#LOG_FILES[@]}.${NC}"
+      return
     fi
+  else
+    # Input is a filename, check if it exists in array
+    found=false
+    for f in "${LOG_FILES[@]}"; do
+      if [[ "$f" == "$selection" ]]; then
+        found=true
+        filename="$selection"
+        break
+      fi
+    done
+    
+    if [[ "$found" == "false" ]]; then
+      echo -e "${YELLOW}File not found: $selection${NC}"
+      return
+    fi
+  fi
+  
+  echo -e "${BLUE}File contents:${NC}"
+  if [[ "$filename" == *.zip ]]; then
+    echo -e "${YELLOW}This is a ZIP file. Extracting and showing content...${NC}"
+    docker exec $LOGSTASH_CONTAINER bash -c "mkdir -p /tmp/extracted && \
+      unzip -o /usr/share/logstash/logs/archived/$filename -d /tmp/extracted && \
+      for file in \$(ls /tmp/extracted); do echo \"=== \$file ===\"; cat /tmp/extracted/\$file | head -n 20; echo \"\n[...truncated...]\"; done"
+  else
+    docker exec $LOGSTASH_CONTAINER bash -c "cat /usr/share/logstash/logs/archived/$filename | head -n 20; echo \"\n[...truncated...]\""
   fi
 }
 
@@ -82,15 +138,48 @@ export_logs() {
       ;;
     2)
       list_archived_logs
-      echo -e "${BLUE}Enter filename to export:${NC}"
-      read -r filename
+      
+      if [[ ${#LOG_FILES[@]} -eq 0 ]]; then
+        return
+      fi
+      
+      echo -e "${BLUE}Enter the number or filename to export:${NC}"
+      read -r selection
+      
+      filename=""
+      # Check if input is a number
+      if [[ "$selection" =~ ^[0-9]+$ ]]; then
+        if [[ $selection -gt 0 && $selection -le ${#LOG_FILES[@]} ]]; then
+          filename="${LOG_FILES[$((selection-1))]}"
+          echo -e "${GREEN}Selected: $filename${NC}"
+        else
+          echo -e "${YELLOW}Invalid number. Please select between 1 and ${#LOG_FILES[@]}.${NC}"
+          return
+        fi
+      else
+        # Input is a filename, check if it exists in array
+        found=false
+        for f in "${LOG_FILES[@]}"; do
+          if [[ "$f" == "$selection" ]]; then
+            found=true
+            filename="$selection"
+            break
+          fi
+        done
+        
+        if [[ "$found" == "false" ]]; then
+          echo -e "${YELLOW}File not found: $selection${NC}"
+          return
+        fi
+      fi
+      
       echo -e "${BLUE}Exporting $filename...${NC}"
       docker cp $LOGSTASH_CONTAINER:/usr/share/logstash/logs/archived/$filename "$EXPORT_DIR/$filename"
       ;;
     3)
       echo -e "${BLUE}Exporting all archived logs...${NC}"
       # Create a temp directory in the container, copy all files there, then extract to host
-      docker exec $LOGSTASH_CONTAINER bash -c "mkdir -p /tmp/archive_export && cp -r /usr/share/logstash/logs/archived/* /tmp/archive_export/"
+      docker exec $LOGSTASH_CONTAINER bash -c "mkdir -p /tmp/archive_export && cp -r /usr/share/logstash/logs/archived/* /tmp/archive_export/ 2>/dev/null || echo 'No files to copy'"
       docker cp $LOGSTASH_CONTAINER:/tmp/archive_export "$EXPORT_DIR/archived"
       ;;
     4)
@@ -163,7 +252,7 @@ while true; do
     5) check_rotation_status ;;
     6) trigger_rotation ;;
     7) 
-      echo -e "${GREEN}Exiting.${NC}"
+      echo -e "${GREEN}Exiting. Goodbye!${NC}"
       exit 0
       ;;
     *)
