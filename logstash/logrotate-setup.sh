@@ -20,10 +20,7 @@ cat > /etc/logrotate.d/logstash << EOF
     rotate 30
     dateext
     dateformat -%Y%m%d-%H%M%S
-    # Important: Copy the file before compression to preserve extension
-    prerotate
-        cp /usr/share/logstash/logs/flask-logs.log /usr/share/logstash/logs/flask-logs.log.bak
-    endscript
+    # NO prerotate - it was causing issues
     compress
     compresscmd /usr/bin/zip
     uncompresscmd /usr/bin/unzip
@@ -32,9 +29,9 @@ cat > /etc/logrotate.d/logstash << EOF
     olddir /usr/share/logstash/logs/archived
     create 0644 logstash logstash
     postrotate
-        # Move backup to archive with .log extension preserved
-        mv /usr/share/logstash/logs/flask-logs.log.bak /usr/share/logstash/logs/archived/flask-logs\$(date +-%Y%m%d-%H%M%S).log
-        # Zip the file properly to ensure .log extension is preserved
+        # Archive with timestamp directly (simpler process)
+        cp /usr/share/logstash/logs/flask-logs.log.1 /usr/share/logstash/logs/archived/flask-logs\$(date +-%Y%m%d-%H%M%S).log
+        # Zip the file properly
         cd /usr/share/logstash/logs/archived
         for f in *.log; do
             if [ -f "\$f" ] && [ ! -f "\$f.zip" ]; then
@@ -48,88 +45,48 @@ cat > /etc/logrotate.d/logstash << EOF
 }
 EOF
 
-# Make logrotate config more aggressive for testing purposes
-echo 'include /etc/logrotate.d' > /etc/logrotate.conf
-echo 'rotate 30' >> /etc/logrotate.conf
-echo 'compress' >> /etc/logrotate.conf
-
 # Set up cron job to run logrotate every minute (for testing)
-echo "* * * * * /usr/sbin/logrotate -f /etc/logrotate.d/logstash >> /var/log/logrotate.log 2>&1" > /etc/cron.d/logrotate-logstash
+echo "* * * * * /usr/sbin/logrotate -v /etc/logrotate.d/logstash >> /var/log/logrotate.log 2>&1" > /etc/cron.d/logrotate-logstash
 chmod 0644 /etc/cron.d/logrotate-logstash
 
-# Create a log extraction helper script
-cat > /usr/local/bin/extract-logs.sh << 'EOF'
+# Add a manual rotation script that can be run on-demand
+cat > /usr/local/bin/rotate-logs-now.sh << 'EOF'
 #!/bin/bash
-# Script to extract and view rotated logs
-
-ARCHIVE_DIR="/usr/share/logstash/logs/archived"
-EXTRACT_DIR="/tmp/extracted_logs"
-
-mkdir -p $EXTRACT_DIR
-
-echo "Available log archives:"
-ls -la $ARCHIVE_DIR
-
-echo ""
-echo "Enter archive filename to extract (or 'all' to extract all):"
-read FILENAME
-
-if [ "$FILENAME" = "all" ]; then
-  for f in $ARCHIVE_DIR/*.zip; do
-    BASENAME=$(basename "$f")
-    echo "Extracting $BASENAME..."
-    unzip -o "$f" -d "$EXTRACT_DIR"
-  done
-else
-  if [ -f "$ARCHIVE_DIR/$FILENAME" ]; then
-    echo "Extracting $FILENAME..."
-    unzip -o "$ARCHIVE_DIR/$FILENAME" -d "$EXTRACT_DIR"
-  else
-    echo "File not found!"
-    exit 1
-  fi
-fi
-
-echo ""
-echo "Extracted logs:"
-ls -la $EXTRACT_DIR
-
-echo ""
-echo "View a log? Enter filename (or 'exit' to quit):"
-read LOGFILE
-
-if [ "$LOGFILE" != "exit" ]; then
-  if [ -f "$EXTRACT_DIR/$LOGFILE" ]; then
-    cat "$EXTRACT_DIR/$LOGFILE" | jq '.' || cat "$EXTRACT_DIR/$LOGFILE"
-  else
-    echo "Log file not found!"
-  fi
-fi
-
-echo "Done. Extracted logs are in $EXTRACT_DIR"
+echo "Running manual log rotation..."
+/usr/sbin/logrotate -vf /etc/logrotate.d/logstash
+echo "Done. Check /var/log/logrotate.log for results."
 EOF
-chmod +x /usr/local/bin/extract-logs.sh
-
-# Create a log cleanup script
-cat > /usr/local/bin/cleanup-old-logs.sh << 'EOF'
-#!/bin/bash
-find /usr/share/logstash/logs/archived -name "*.zip" -type f -mtime +30 -delete
-echo "Cleanup script ran at $(date)" >> /var/log/logrotate-cleanup.log
-EOF
-chmod +x /usr/local/bin/cleanup-old-logs.sh
-
-# Add daily log cleanup job
-echo "0 0 * * * /usr/local/bin/cleanup-old-logs.sh" > /etc/cron.d/cleanup-logs
-chmod 0644 /etc/cron.d/cleanup-logs
+chmod +x /usr/local/bin/rotate-logs-now.sh
 
 # Create log directories for tracking rotations
 mkdir -p /var/log/logrotate
 touch /var/log/logrotate.log
 touch /var/log/logrotate-execution.log
-touch /var/log/logrotate-cleanup.log
+
+# Add a background process to monitor log size and force rotation if needed
+cat > /usr/local/bin/monitor-log-size.sh << 'EOF'
+#!/bin/bash
+LOG_FILE="/usr/share/logstash/logs/flask-logs.log"
+MAX_SIZE_BYTES=$((10 * 1024 * 1024)) # 10 MB
+
+while true; do
+  if [ -f "$LOG_FILE" ]; then
+    FILE_SIZE=$(stat -c%s "$LOG_FILE")
+    if [ $FILE_SIZE -gt $MAX_SIZE_BYTES ]; then
+      echo "Log file size ($FILE_SIZE bytes) exceeds maximum ($MAX_SIZE_BYTES bytes), forcing rotation..." >> /var/log/logrotate-execution.log
+      /usr/sbin/logrotate -vf /etc/logrotate.d/logstash >> /var/log/logrotate.log 2>&1
+    fi
+  fi
+  sleep 10
+done
+EOF
+chmod +x /usr/local/bin/monitor-log-size.sh
 
 # Start cron daemon in background
 service cron start
+
+# Start the log size monitor in background
+nohup /usr/local/bin/monitor-log-size.sh &
 
 # Verify directory permissions
 echo "Log directories setup:"
